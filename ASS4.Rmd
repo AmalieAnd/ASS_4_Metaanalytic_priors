@@ -12,13 +12,14 @@ library(metafor)
 library(lme4)
 library(brms)
 library(tidyverse)
-pacman::p_load(readxl)
+pacman::p_load(readxl, coda, bayesplot)
+
 
 meta <- read_xlsx("Assignment4MetaData.xlsx")
 pitch <- read_xlsx("Assignment4PitchDatav2.xlsx")
 ```
 
-                                                          ### Assignment 4
+                                                          ### Assignment 4 ###
 
 In this assignment we do the following:
 - we reproduce the meta-analysis of pitch SD from last semester in a Bayesian framework
@@ -52,52 +53,40 @@ ggplot(meta, aes(x=MeanES, y=StudyRef)) +
   geom_point()
 ```
 
-```{r standardising}
-pitch$pitchmean_s = scale(pitch$PitchMean)
-pitch$pitchSD_s = scale(pitch$PitchSD)
-pitch$pitchmedian_s = scale(pitch$PitchMedian)
-pitch$pitchrange_s = scale(pitch$PitchRange)
-pitch$pitchIQR_s = scale(pitch$PitchIQR)
-pitch$pitchmad_s = scale(pitch$PitchMad)
-
-pitch_s <- 
-  select(pitch, ID_unique, diagnosis, studynr, trial, 13:18, PitchCV)
-```
-
 
 ```{r meta analysis model}
-library(brms)
-
-brm_out <- brm(
+meta_mod <- brm(
   MeanES | se(VarianceES) ~ 1 + (1 | StudyID), 
-  prior = set_prior("uniform(0, 1000)", class = "sd"),
+  prior = c(set_prior("normal(0, 2)", class = "sd"),
+            set_prior("normal(0, 2)", class = "Intercept")),
+  iter = 10000,
   data = meta, 
   cores = 4
   )
 
-brm_out
+meta_mod
+#Population-Level Effects: 
+#          Estimate Est.Error l-95% CI u-95% CI Eff.Sample Rhat
+#Intercept    -0.62      0.29    -1.17    -0.01        500 1.00
 
+# PRIORS ^^^^
+#For each parameter, Eff.Sample is a crude measure of effective sample size, and Rhat is the potential scale reduction factor on split chains (at convergence, Rhat = 1).
 
-brm_out2 <- brm(
-  pitchSD_s ~ 1 + diagnosis + (1 | studynr), 
-  data = pitch_s, 
-  cores = 4
-  )
-
-brm_out2
-
-pairs(brm_out2, np = nuts_params(brm_out2))
+pairs(meta_mod, np = nuts_params(meta_mod))
+plot(meta_mod)
+traceplot(meta_mod)
+show(meta_mod)
 ```
 
 ```{r trying out forest plot}
-#forest plot
-#install.packages("BiocManager")
+#forest plot  
+install.packages("BiocManager")
+ 
+pacman::p_load(here, brms, brmstools)
 
-
-#pacman::p_load(here, brms, brmstools)
-#forest(brm_out,
-#       show_data = TRUE,
-#       av_name = "Effect size")
+forest(pitch_cons,
+       show_data = TRUE,
+       av_name = "Effect size")
 ```
 
 
@@ -105,21 +94,112 @@ pairs(brm_out2, np = nuts_params(brm_out2))
 - the data is available as Assignment4PitchData.csv (thanks Celine)
 - Also, let's standardize the data, so that they are compatible with our meta-analytic prior (Cohen's d is measured in SDs).
 - Is there any structure in the dataset that we should account for with random effects? How would you implement that? Or, if you don't know how to do bayesian random effects, is there anything we would need to simplify in the dataset?
+
 Yes, study. 
 
+```{r standardising}
+#scaling
+pitch$pitchmean_s = scale(pitch$PitchMean) 
+pitch$pitchSD_s = scale(pitch$PitchSD) 
+pitch$pitchmedian_s = scale(pitch$PitchMedian)
+pitch$pitchrange_s = scale(pitch$PitchRange)
+pitch$pitchIQR_s = scale(pitch$PitchIQR)
+pitch$pitchmad_s = scale(pitch$PitchMad)
 
-#Step 3: Build a regression model predicting Pitch SD from Diagnosis.
+#new df w/ scaled variables
+pitch_s <- 
+  select(pitch, ID_unique, diagnosis, studynr, trial, 13:18, PitchCV)
+```
+
+
+#Step 3: [CONSERVATIVE] Build a regression model predicting Pitch SD from Diagnosis.
 - how is the outcome distributed? (likelihood function)
 - how are the parameters of the likelihood distribution distributed? Which predictors should they be conditioned on?
 - use a skeptical/conservative prior for the effects of diagnosis. Remember you'll need to motivate it.
 - Describe and plot the estimates. Evaluate model quality
-```{r}
+```{r conservative pitch model}
+# pitch model w/ priors from meta model above
+get_prior(pitchSD_s ~ 1 + diagnosis + (1 | studynr), data = pitch_s, family = gaussian())
+
+pitch_cons <- brm(
+  pitchSD_s ~ 1 + diagnosis + (1 | studynr), 
+  prior = c(set_prior("normal(0, 0.1)", class = "Intercept"), 
+            set_prior("normal(0, 0.1)", class = "b"), 
+            set_prior("cauchy(0, 1)", class = "sd"), 
+            set_prior("cauchy(0, 1)", class = "sigma")),
+  data = pitch_s
+)
+
+#calling results
+pitch_cons
+#checking divergents
+pairs(pitch_cons, np = nuts_params(pitch_cons))
+#plot
+plot(pitch_cons)
+#traceplots
+post <- posterior_samples(pitch_cons, add_chain = T)
+mcmc_trace(post[, c(1:7,9)],  # we need to include column 7 because it contains the chain info 
+           facet_args = list(ncol = 3), 
+           size = .15) +
+  labs(title = "My custom trace plots") + 
+  scale_color_discrete() + 
+  theme_light() +
+  theme(legend.position = c(.95, .2))
 
 ```
 
-#Step 4: Now re-run the model with the meta-analytic prior
+```{r real_updated_cons_model}
+pitch_cons_2 <- brm(
+  pitchSD_s ~ 1 + diagnosis + (1 | studynr) + (1 | ID_unique) + (1 | trial), 
+  prior = c(set_prior("normal(0, 0.1)", class = "Intercept"), 
+            set_prior("normal(0, 0.1)", class = "b", coef = "diagnosis"),
+            set_prior("cauchy(0, 0.1)", class = "sd", coef = "Intercept", group = "studynr"),
+            set_prior("cauchy(0, 0.1)", class = "sd", coef = "Intercept", group = "ID_unique"), 
+            set_prior("cauchy(0, 0.1)", class = "sd", coef = "Intercept", group = "trial"),
+            set_prior("cauchy(0, 1)", class = "sigma")),
+  data = pitch_s
+)
+
+#calling results
+pitch_cons_2
+#checking divergents
+pairs(pitch_cons_2, np = nuts_params(pitch_cons_2))
+#plot
+plot(pitch_cons_2)
+#traceplots
+post2 <- posterior_samples(pitch_cons_2, add_chain = T)
+mcmc_trace(post2[, c(1:7,9)],  # we need to include column 7 because it contains the chain info 
+           facet_args = list(ncol = 3), 
+           size = .15) +
+  labs(title = "My custom trace plots") + 
+  scale_color_discrete() + 
+  theme_light() +
+  theme(legend.position = c(.95, .2))
+
+# PEEEPEEECHSECK
+pp_check(pitch_cons_2)
+```
+
+
+#Step 4: [META] Now re-run the model with the meta-analytic prior
 - Describe and plot the estimates. Evaluate model quality
-```{r}
+```{r meta pitch model}
+pitch_meta <- brm(
+  pitchSD_s ~ 1 + diagnosis + (1 | studynr), 
+  prior = c(set_prior("normal(0, 0.1)", class = "Intercept"),
+            set_prior("normal(-0.61 , 0.3)", class = "b"), 
+            set_prior("cauchy(0, 0.5)", class = "sd"), 
+            set_prior("cauchy(0, 1)", class = "sigma")),
+  iter = 1000,
+  data = pitch_s
+)
+
+pitch_meta
+pairs(pitch_meta, np = nuts_params(pitch_meta))
+plot(pitch_meta)
+```
+
+```{r pp_check}
 
 ```
 
@@ -128,8 +208,37 @@ Yes, study.
 - Compare posteriors between the two models
 - Compare their relative distance from truth (WAIC)
 - Discuss how they compare and whether any of them is best.
+```{r compare models}
+compare(pitch_cons, pitch_meta)
+
+loo_compare(pitch_cons, pitch_meta)
+
+# pp check
+#prior.predictive.check(n,posterior,statistic,obs=TRUE,F_n,
+#                       Amat=0L,exact=0L,difmin=0L,effectsize=FALSE,seed=0)
+
+```
 
 #Step 6: Prepare a nice write up of the analysis and answer the questions at the top.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 Optional step 7: how skeptical should a prior be?
 - Try different levels of skepticism and compare them using WAIC.

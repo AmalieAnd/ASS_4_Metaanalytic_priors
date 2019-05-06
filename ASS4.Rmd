@@ -8,12 +8,7 @@ output: html_document
 setwd("~/Library/Mobile Documents/com~apple~CloudDocs/4. Aarhus Universitet/4. Semester/1. Computational Modelling/RFOLDER/ASS4_Metaanalytic priors/ASS4")
 
 #Packages
-library(metafor)
-library(lme4)
-library(brms)
-library(tidyverse)
-pacman::p_load(readxl, coda, bayesplot)
-
+pacman::p_load(readxl, coda, bayesplot, gridExtra, tidyverse, brms, metafor, lme4)
 
 meta <- read_xlsx("Assignment4MetaData.xlsx")
 pitch <- read_xlsx("Assignment4PitchDatav2.xlsx")
@@ -189,11 +184,48 @@ pp_check(pitch_cons_2)
 
 ```
 
+```{r plot}
+f <- 
+  fitted(pitch_cons_2) %>%
+  as_tibble() %>%
+  # tack the pitch_s data onto the fitted() results
+  bind_cols(pitch_s)
+
+
+# SCHIZOPLOT
+pred.plot1 <- f %>%
+  filter(diagnosis == 1) %>%
+  ggplot(aes(x = Estimate)) +
+  #stat_function(fun = dnorm, args = list(mean = 0, sd = 0.1), linetype = 2) +  
+  geom_density(aes(x = pitchSD_s, color = "transparent", fill = "red", alpha = 1/2)) + geom_density(color = "transparent", fill = "dodgerblue3", alpha = 1/2) +
+   
+  scale_x_continuous(limits=c(-3,3)) + 
+  
+  labs(title = "Estimated data versus actual data (Diagnosis 1)",
+       y     = "density") + theme(legend.position = "none")
+
+
+#TD PLOT
+pred.plot2 <- f %>%
+  filter(diagnosis == 0) %>%
+  ggplot(aes(x = Estimate)) +
+  #stat_function(fun = dnorm, args = list(mean = 0, sd = 0.1), linetype = 2) +  
+  geom_density(aes(x = pitchSD_s, color = "transparent", fill = "red", alpha = 1/2)) +
+  geom_density(color = "transparent", fill = "dodgerblue3", alpha = 1/2) +
+   
+  scale_x_continuous(limits=c(-3,3)) + 
+  labs(title = "Estimated data versus actual data (Diagnosis 0)",
+       y     = "density")+ theme(legend.position = "none")
+
+
+grid.arrange(pred.plot1, pred.plot2)
+```
+
 
 #Step 4: [META] Now re-run the model with the meta-analytic prior
 - Describe and plot the estimates. Evaluate model quality
 ```{r meta pitch model}
-pitch_meta <- brm(
+pitch_meta <- brm( 
   pitchSD_s ~ 1 + diagnosis + (1 | studynr) + (1 | ID_unique) + (1 | trial),
   prior = c(set_prior("normal(0, 0.1)", class = "Intercept"), 
             set_prior("normal(-0.61 , 0.29)", class = "b"),
@@ -225,7 +257,7 @@ plot(marginal_effects(pitch_meta))
 - Compare their relative distance from truth (WAIC)
 - Discuss how they compare and whether any of them is best.
 ```{r compare models}
-compare(pitch_cons, pitch_meta)
+compare(pitch_cons, pitch_meta) 
 
 loo_compare(pitch_cons, pitch_meta)
 
@@ -244,6 +276,31 @@ print(comp_score, simplify = F)
 waic(pitch_meta, pitch_cons_2) #the outcome of the meta-analysis does slightly better
 
 
+```
+
+```{r plot}
+plot.brm.all <- f %>%
+  ggplot(aes(x = Estimate)) +
+  stat_function(fun = dnorm, args = list(mean = 0, sd = 0.2), linetype = 2) +  
+  geom_density(aes(x = pitchSD_s, color = "transparent", fill = "red", alpha = 1/2)) + 
+  geom_density(color = "transparent", fill = "dodgerblue3", alpha = 1/2) +
+   
+  scale_x_continuous(limits=c(-3,3)) + scale_y_continuous(limits=c(-0,2)) +
+  
+  labs(title = "Estimated data versus actual data for model (m =0, SD = 0.2)", y = "density") + theme(legend.position = "none")
+
+
+plot.meta.prior <- mm %>%
+    ggplot(aes(x = Estimate)) +
+  stat_function(fun = dnorm, args = list(mean = -0.61, sd = 0.29), linetype = 2) +  
+  geom_density(aes(x = pitchSD_s, color = "transparent", fill = "red", alpha = 1/2)) +
+  geom_density(color = "transparent", fill = "dodgerblue3", alpha = 1/2) +
+   
+  scale_x_continuous(limits=c(-3,3)) + scale_y_continuous(limits=c(-0,2)) +
+  labs(title = "Estimated data versus actual data for meta model (m =-0.61, SD = 0.29)",
+       y     = "density")+ theme(legend.position = "none")
+
+grid.arrange(plot.brm.all, plot.meta.prior)
 ```
 
 #Step 6: Prepare a nice write up of the analysis and answer the questions at the top.

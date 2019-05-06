@@ -151,10 +151,11 @@ pp_check(pitch_cons)
 ```
 
 ```{r final_updated_cons_model}
+
 pitch_cons_2 <- brm(
   pitchSD_s ~ 1 + diagnosis + (1 | studynr) + (1 | ID_unique) + (1 | trial), 
   prior = c(set_prior("normal(0, 0.1)", class = "Intercept"), 
-            set_prior("normal(0, 0.2)", class = "b", coef = "diagnosis"),
+            set_prior("normal(0, 0.2)", class = "b"),
             set_prior("cauchy(0, 0.1)", class = "sd", coef = "Intercept", group = "studynr"),    # random effect: study
             set_prior("cauchy(0, 0.1)", class = "sd", coef = "Intercept", group = "ID_unique"),  # random effect: ID
             set_prior("cauchy(0, 0.1)", class = "sd", coef = "Intercept", group = "trial"),      # random effect: trial
@@ -210,8 +211,11 @@ plot(pitch_meta)
 
 #marginal effects w/o data
 brms::marginal_effects(pitch_meta)
+
+pitch_s$diagnosis <- as.factor(pitch_s$diagnosis)
 #marg effects with data
-plot(marginal_effects(pitch_meta), points = T)
+plot(marginal_effects(pitch_meta))
+
 ```
 
 

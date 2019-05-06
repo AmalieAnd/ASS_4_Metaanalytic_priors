@@ -117,7 +117,7 @@ pitch_s <-
 - how are the parameters of the likelihood distribution distributed? Which predictors should they be conditioned on?
 - use a skeptical/conservative prior for the effects of diagnosis. Remember you'll need to motivate it.
 - Describe and plot the estimates. Evaluate model quality
-```{r conservative pitch model}
+```{r trial cons pitch model}
 # pitch model w/ priors from meta model above
 get_prior(pitchSD_s ~ 1 + diagnosis + (1 | studynr), data = pitch_s, family = gaussian())
 
@@ -146,17 +146,21 @@ mcmc_trace(post[, c(1:7,9)],  # we need to include column 7 because it contains 
   theme_light() +
   theme(legend.position = c(.95, .2))
 
+#ppcheck
+pp_check(pitch_cons)
 ```
 
-```{r real_updated_cons_model}
+```{r final_updated_cons_model}
 pitch_cons_2 <- brm(
   pitchSD_s ~ 1 + diagnosis + (1 | studynr) + (1 | ID_unique) + (1 | trial), 
   prior = c(set_prior("normal(0, 0.1)", class = "Intercept"), 
-            set_prior("normal(0, 0.1)", class = "b", coef = "diagnosis"),
-            set_prior("cauchy(0, 0.1)", class = "sd", coef = "Intercept", group = "studynr"),
-            set_prior("cauchy(0, 0.1)", class = "sd", coef = "Intercept", group = "ID_unique"), 
-            set_prior("cauchy(0, 0.1)", class = "sd", coef = "Intercept", group = "trial"),
+            set_prior("normal(0, 0.2)", class = "b", coef = "diagnosis"),
+            set_prior("cauchy(0, 0.1)", class = "sd", coef = "Intercept", group = "studynr"),    # random effect: study
+            set_prior("cauchy(0, 0.1)", class = "sd", coef = "Intercept", group = "ID_unique"),  # random effect: ID
+            set_prior("cauchy(0, 0.1)", class = "sd", coef = "Intercept", group = "trial"),      # random effect: trial
             set_prior("cauchy(0, 1)", class = "sigma")),
+  iter = 10000,
+  cores = 4,
   data = pitch_s
 )
 
@@ -176,8 +180,12 @@ mcmc_trace(post2[, c(1:7,9)],  # we need to include column 7 because it contains
   theme_light() +
   theme(legend.position = c(.95, .2))
 
-# PEEEPEEECHSECK
+#marginal effect
+brms::marginal_effects(pitch_cons_2)
+
+# PEEEPEEECHECK
 pp_check(pitch_cons_2)
+
 ```
 
 
@@ -185,23 +193,27 @@ pp_check(pitch_cons_2)
 - Describe and plot the estimates. Evaluate model quality
 ```{r meta pitch model}
 pitch_meta <- brm(
-  pitchSD_s ~ 1 + diagnosis + (1 | studynr), 
-  prior = c(set_prior("normal(0, 0.1)", class = "Intercept"),
-            set_prior("normal(-0.61 , 0.3)", class = "b"), 
-            set_prior("cauchy(0, 0.5)", class = "sd"), 
+  pitchSD_s ~ 1 + diagnosis + (1 | studynr) + (1 | ID_unique) + (1 | trial),
+  prior = c(set_prior("normal(0, 0.1)", class = "Intercept"), 
+            set_prior("normal(-0.61 , 0.29)", class = "b"),
+            set_prior("cauchy(0, 0.1)", class = "sd", coef = "Intercept", group = "studynr"),    # random effect: study
+            set_prior("cauchy(0, 0.1)", class = "sd", coef = "Intercept", group = "ID_unique"),  # random effect: ID
+            set_prior("cauchy(0, 0.1)", class = "sd", coef = "Intercept", group = "trial"),      # random effect: trial
             set_prior("cauchy(0, 1)", class = "sigma")),
-  iter = 1000,
+  iter = 10000,
   data = pitch_s
-)
+  )
 
 pitch_meta
 pairs(pitch_meta, np = nuts_params(pitch_meta))
 plot(pitch_meta)
+
+#marginal effects w/o data
+brms::marginal_effects(pitch_meta)
+#marg effects with data
+plot(marginal_effects(pitch_meta), points = T)
 ```
 
-```{r pp_check}
-
-```
 
 #Step 5: Compare the models
 - Plot priors and posteriors of the diagnosis effect in both models
@@ -216,6 +228,17 @@ loo_compare(pitch_cons, pitch_meta)
 # pp check
 #prior.predictive.check(n,posterior,statistic,obs=TRUE,F_n,
 #                       Amat=0L,exact=0L,difmin=0L,effectsize=FALSE,seed=0)
+
+
+
+pitch_meta <- add_criterion(pitch_meta, "waic")
+pitch_cons_2 <- add_criterion(pitch_cons_2, "waic")
+#comparing WAIC
+comp_score <- loo_compare(pitch_meta, pitch_cons_2, criterion = "waic")
+print(comp_score, simplify = F)
+#comparing them 
+waic(pitch_meta, pitch_cons_2) #the outcome of the meta-analysis does slightly better
+
 
 ```
 

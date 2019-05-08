@@ -8,7 +8,7 @@ output: html_document
 setwd("~/Library/Mobile Documents/com~apple~CloudDocs/4. Aarhus Universitet/4. Semester/1. Computational Modelling/RFOLDER/ASS4_Metaanalytic priors/ASS4")
 
 #Packages
-pacman::p_load(readxl, coda, bayesplot, gridExtra, tidyverse, brms, metafor, lme4)
+pacman::p_load(readxl, coda, bayesplot, gridExtra, tidyverse, brms, metafor, lme4, ggplot2)
 
 meta <- read_xlsx("Assignment4MetaData.xlsx")
 pitch <- read_xlsx("Assignment4PitchDatav2.xlsx")
@@ -48,9 +48,8 @@ ggplot(meta, aes(x=MeanES, y=StudyRef)) +
   geom_point()
 ```
 
-
 ```{r meta analysis model}
-meta_mod <- brm(
+meta_mod <- brm( 
   MeanES | se(VarianceES) ~ 1 + (1 | StudyID), 
   prior = c(set_prior("normal(0, 2)", class = "sd"),
             set_prior("normal(0, 2)", class = "Intercept")),
@@ -75,7 +74,7 @@ show(meta_mod)
 
 ```{r trying out forest plot}
 #forest plot  
-install.packages("BiocManager")
+install.packages("BiocManager") 
  
 pacman::p_load(here, brms, brmstools)
 
@@ -83,6 +82,10 @@ forest(pitch_cons,
        show_data = TRUE,
        av_name = "Effect size")
 ```
+
+
+
+
 
 
 # Step 2: Prepare the pitch SD data from last year
@@ -107,8 +110,10 @@ pitch_s <-
 ```
 
 
+
+
 #Step 3: [CONSERVATIVE] Build a regression model predicting Pitch SD from Diagnosis.
-- how is the outcome distributed? (likelihood function)
+- how is the outcome distributed? (likelihood function) 
 - how are the parameters of the likelihood distribution distributed? Which predictors should they be conditioned on?
 - use a skeptical/conservative prior for the effects of diagnosis. Remember you'll need to motivate it.
 - Describe and plot the estimates. Evaluate model quality
@@ -184,14 +189,14 @@ pp_check(pitch_cons_2)
 
 ```
 
-```{r plot}
-f <- 
+```{r density plot cons model}
+f <-   
   fitted(pitch_cons_2) %>%
   as_tibble() %>%
   # tack the pitch_s data onto the fitted() results
   bind_cols(pitch_s)
 
-
+ 
 # SCHIZOPLOT
 pred.plot1 <- f %>%
   filter(diagnosis == 1) %>%
@@ -219,7 +224,48 @@ pred.plot2 <- f %>%
 
 
 grid.arrange(pred.plot1, pred.plot2)
+
+
 ```
+
+```{r Checking the chain (hairy caterpillars)}
+p_load(bayesplot)
+post <- posterior_samples(pitch_cons_2, add_chain = T)
+
+mcmc_trace(post[, c(1:7,9)],  # we need to include column 7 because it contains the chain info 
+           facet_args = list(ncol = 3), 
+           size = .15) +
+  labs(title = "My custom trace plots") + scale_color_discrete() + theme_light()+
+  theme(legend.position = c(.95, .2))
+
+post1 <- posterior_samples(pitch_cons_2, add_chain = T)
+mcmc_trace(post1[, c(1:6,172)],  # we need to include column 7 because it contains the chain info 
+           facet_args = list(ncol = 2), 
+           size = .15) +
+  labs(title = "Our custom trace plots #caterpillar") + scale_color_discrete() + theme_light()
+```
+
+```{r inspecting the estimates}
+pitch_s$diagnosis <- as.numeric(pitch_s$diagnosis)
+
+p50 <- 
+  ggplot(data =  pitch_s, 
+         aes(x = diagnosis, y = pitchSD_s)) +
+  geom_abline(intercept = post1[1:50, 1], 
+              slope     = post1[1:50, 2],
+              size = 1/3, alpha = .3) +
+  geom_point(shape = 1, size = 2, color = "royalblue") +
+  coord_cartesian(xlim = range(pitch_s$diagnosis),
+                  ylim = range(pitch_s$pitchSD_s)) +
+  labs(subtitle = "N = 100") +
+  theme_bw() +
+  theme(panel.grid = element_blank())
+p50
+```
+
+
+
+
 
 
 #Step 4: [META] Now re-run the model with the meta-analytic prior
@@ -238,17 +284,73 @@ pitch_meta <- brm(
   )
 
 pitch_meta
+
+#check of sampling --> looking for a pattern of red crosses
 pairs(pitch_meta, np = nuts_params(pitch_meta))
 plot(pitch_meta)
 
 #marginal effects w/o data
 brms::marginal_effects(pitch_meta)
-
 pitch_s$diagnosis <- as.factor(pitch_s$diagnosis)
-#marg effects with data
-plot(marginal_effects(pitch_meta))
 
+#marg effects w data
+plot(marginal_effects(pitch_meta))
 ```
+
+```{r plot meta }
+pred.plot.mm1 <- mm %>%
+  filter(diagnosis == 1) %>%
+  ggplot(aes(x = Estimate)) +
+  #stat_function(fun = dnorm, args = list(mean = -0.61, sd = 0.28), linetype = 2) + 
+  geom_density(aes(x = pitchSD_s, color = "transparent", fill = "red", alpha = 1/2)) +
+  geom_density(color = "transparent", fill = "dodgerblue3", alpha = 1/2) +
+  scale_x_continuous(limits=c(-3,3)) + 
+  
+  labs(title = "Estimated data versus actual data for meta prior model (Diagnosis 1)",
+       y     = "density") + theme(legend.position = "none")
+
+pred.plot.mm2 <- mm %>%
+  filter(diagnosis == 0) %>%
+  ggplot(aes(x = Estimate)) +
+  #stat_function(fun = dnorm, args = list(mean = -0.61, sd = 0.28), linetype = 2) + 
+  geom_density(aes(x = pitchSD_s, color = "transparent", fill = "red", alpha = 1/2)) +
+  geom_density(color = "transparent", fill = "dodgerblue3", alpha = 1/2) +
+  scale_x_continuous(limits=c(-3,3)) + 
+  labs(title = "Estimated data versus actual data for meta prior model (Diagnosis 0)",
+       y     = "density")+ theme(legend.position = "none")
+
+grid.arrange(pred.plot.mm1, pred.plot.mm2)
+```
+
+```{r another meta oooone}
+# now use `fitted()` to get the model-implied trajectories
+pm <-  
+  fitted(pitch_meta) %>%
+  as_tibble() %>%
+  # tack the `pitch_s` data onto the `fitted()` results
+  bind_cols(pitch_s)
+
+pm %>%
+  ggplot(aes(x = diagnosis, y = pitchSD_s)) +
+  geom_abline(intercept = fixef(pitch_meta)[1], 
+              slope     = fixef(pitch_meta)[2]) +
+  geom_point(shape = 1, size = 2, color = "royalblue") +
+  theme_bw() +
+  theme(panel.grid = element_blank())
+```
+
+```{r meta traceplots}
+meta.post <- posterior_samples(pitch_meta, add_chain = T)
+mcmc_trace(meta.post[, c(1:6,172)],  # we need to include column 7 because it contains the chain info 
+           facet_args = list(ncol = 2), 
+           size = .15) +
+  labs(title = "Our custom trace plots #caterpillar") + 
+  scale_color_discrete() + 
+  theme_light()
+```
+
+
+
 
 
 #Step 5: Compare the models
@@ -256,30 +358,16 @@ plot(marginal_effects(pitch_meta))
 - Compare posteriors between the two models
 - Compare their relative distance from truth (WAIC)
 - Discuss how they compare and whether any of them is best.
-```{r compare models}
-compare(pitch_cons, pitch_meta) 
 
-loo_compare(pitch_cons, pitch_meta)
+```{r density plot of models against each other}  
+# now use fitted() to get the model-implied trajectories
+ mm <-  fitted(pitch_meta) %>%
+  as_tibble() %>%
+  # tack the pitch_s data onto the fitted() results
+  bind_cols(pitch_s)
 
-# pp check
-#prior.predictive.check(n,posterior,statistic,obs=TRUE,F_n,
-#                       Amat=0L,exact=0L,difmin=0L,effectsize=FALSE,seed=0)
-
-
-
-pitch_meta <- add_criterion(pitch_meta, "waic")
-pitch_cons_2 <- add_criterion(pitch_cons_2, "waic")
-#comparing WAIC
-comp_score <- loo_compare(pitch_meta, pitch_cons_2, criterion = "waic")
-print(comp_score, simplify = F)
-#comparing them 
-waic(pitch_meta, pitch_cons_2) #the outcome of the meta-analysis does slightly better
-
-
-```
-
-```{r plot}
-plot.brm.all <- f %>%
+# cons
+plot.cons.final <- f %>% 
   ggplot(aes(x = Estimate)) +
   stat_function(fun = dnorm, args = list(mean = 0, sd = 0.2), linetype = 2) +  
   geom_density(aes(x = pitchSD_s, color = "transparent", fill = "red", alpha = 1/2)) + 
@@ -289,8 +377,8 @@ plot.brm.all <- f %>%
   
   labs(title = "Estimated data versus actual data for model (m =0, SD = 0.2)", y = "density") + theme(legend.position = "none")
 
-
-plot.meta.prior <- mm %>%
+#meta
+plot.meta <- mm %>%
     ggplot(aes(x = Estimate)) +
   stat_function(fun = dnorm, args = list(mean = -0.61, sd = 0.29), linetype = 2) +  
   geom_density(aes(x = pitchSD_s, color = "transparent", fill = "red", alpha = 1/2)) +
@@ -300,50 +388,43 @@ plot.meta.prior <- mm %>%
   labs(title = "Estimated data versus actual data for meta model (m =-0.61, SD = 0.29)",
        y     = "density")+ theme(legend.position = "none")
 
-grid.arrange(plot.brm.all, plot.meta.prior)
+grid.arrange(plot.cons.final, plot.meta)
 ```
+
+```{r SKROT compare models}
+ 
+pitch_meta <- add_criterion(pitch_meta, "waic")
+pitch_cons_2 <- add_criterion(pitch_cons_2, "waic")
+#comparing WAIC
+comp_score <- loo_compare(pitch_meta, pitch_cons_2, criterion = "waic")
+print(comp_score, simplify = F)
+#comparing them 
+waic(pitch_meta, pitch_cons_2) #the outcome of the meta-analysis does slightly better
+```
+
+```{r WAIC comparison } 
+# compute and save the WAIC information for the next three models
+pitch_cons_2 <- add_criterion(pitch_cons_2, "waic")
+pitch_meta <- add_criterion(pitch_meta, "waic")
+
+# compare the WAIC estimates
+w <- loo_compare(pitch_cons_2, pitch_meta,
+                 criterion = "waic")
+
+print(w, simplify = F)
+
+model_weights(pitch_cons_2, pitch_meta, 
+              weights = "waic") %>% 
+  round(digits = 2)
+
+#pitch_cons_2   pitch_meta 
+#        0.98         0.02 
+```
+
+
 
 #Step 6: Prepare a nice write up of the analysis and answer the questions at the top.
+See hand-in
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-Optional step 7: how skeptical should a prior be?
-- Try different levels of skepticism and compare them using WAIC.
-
-Optional step 8: Include other predictors
-- Do age, gender and education improve the model?
-- Should they be main effects or interactions?
-
-Optional step 9: Bromance magic.
-- explore the bromance code below including random effects (by default with weakly informative priors)
-- learn how to change the prior
-- explore effects of trial, age, gender, including the appropriate random slopes
-- compare the models you created using WAIC and posterior predictive check (pp_check())
-
-
-```{r}
-brm_out <- brm(PitchSD ~ 1 + Diagnosis  +(1|ID_unique/Study), # Outcome as a function of the predictors as in lme4. 
-               data=Data, # Define the data
-               family=gaussian(), # Define the family. 
-               iter = 5000, warmup = 2000, cores = 4)
-summary(brm_out1)
-plot(brm_out1)
-
-```

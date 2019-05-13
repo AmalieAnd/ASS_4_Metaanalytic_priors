@@ -49,7 +49,7 @@ ggplot(meta, aes(x=MeanES, y=StudyRef)) +
 ```
 
 ```{r meta analysis model}
-meta_mod <- brm( 
+meta_mod <- brm(  
   MeanES | se(VarianceES) ~ 1 + (1 | StudyID), 
   prior = c(set_prior("normal(0, 2)", class = "sd"),
             set_prior("normal(0, 2)", class = "Intercept")),
@@ -90,14 +90,14 @@ forest(pitch_cons,
 
 # Step 2: Prepare the pitch SD data from last year
 - the data is available as Assignment4PitchData.csv (thanks Celine)
-- Also, let's standardize the data, so that they are compatible with our meta-analytic prior (Cohen's d is measured in SDs).
+- Also, let's standardize the data, so that they are compatible with our meta-analytic prior (Cohen's d is measured in SDs). 
 - Is there any structure in the dataset that we should account for with random effects? How would you implement that? Or, if you don't know how to do bayesian random effects, is there anything we would need to simplify in the dataset?
 
 Yes, study. 
 
-```{r standardising}
-#scaling
-pitch$pitchmean_s = scale(pitch$PitchMean) 
+```{r standardising} 
+#scaling 
+pitch$pitchmean_s = scale(pitch$PitchMean)  
 pitch$pitchSD_s = scale(pitch$PitchSD) 
 pitch$pitchmedian_s = scale(pitch$PitchMedian)
 pitch$pitchrange_s = scale(pitch$PitchRange)
@@ -107,6 +107,9 @@ pitch$pitchmad_s = scale(pitch$PitchMad)
 #new df w/ scaled variables
 pitch_s <- 
   select(pitch, ID_unique, diagnosis, studynr, trial, 13:18, PitchCV)
+
+pitch_s$diagnosis <- as.factor(pitch_s$diagnosis)
+
 ```
 
 
@@ -117,7 +120,7 @@ pitch_s <-
 - how are the parameters of the likelihood distribution distributed? Which predictors should they be conditioned on?
 - use a skeptical/conservative prior for the effects of diagnosis. Remember you'll need to motivate it.
 - Describe and plot the estimates. Evaluate model quality
-```{r trial cons pitch model}
+```{r trial cons pitch model} 
 # pitch model w/ priors from meta model above
 get_prior(pitchSD_s ~ 1 + diagnosis + (1 | studynr), data = pitch_s, family = gaussian())
 
@@ -150,8 +153,8 @@ mcmc_trace(post[, c(1:7,9)],  # we need to include column 7 because it contains 
 pp_check(pitch_cons)
 ```
 
-```{r final_updated_cons_model}
-
+```{r second trial model}
+ 
 pitch_cons_2 <- brm(
   pitchSD_s ~ 1 + diagnosis + (1 | studynr) + (1 | ID_unique) + (1 | trial), 
   prior = c(set_prior("normal(0, 0.1)", class = "Intercept"), 
@@ -188,12 +191,51 @@ brms::marginal_effects(pitch_cons_2)
 pp_check(pitch_cons_2)
 
 ```
+Standardised SD of Pitch ~ 1 + Diagnosis + (1 | ID ) + (1 | Trial/Study number)
 
-```{r density plot cons model}
+```{r final_updated_cons_model} 
+#obs the model is has nested random effects
+pitch_cons_2 <- brm(
+  pitchSD_s ~ 1 + diagnosis + (1 | ID_unique) + (1 | trial/studynr), 
+  prior = c(set_prior("normal(0, 0.1)", class = "Intercept"), 
+            set_prior("normal(0, 0.2)", class = "b"),
+            set_prior("cauchy(0, 0.1)", class = "sd", coef = "Intercept", group = "ID_unique"),      # random effect: ID
+            set_prior("cauchy(0, 0.1)", class = "sd", coef = "Intercept", group = "trial:studynr"),  # nested random effect: trial + studynr
+            set_prior("cauchy(0, 1)", class = "sigma")),
+  iter = 10000,
+  cores = 4,
+  data = pitch_s
+)
+
+#calling results
+pitch_cons_2
+#checking divergents
+pairs(pitch_cons_2, np = nuts_params(pitch_cons_2))
+#plot
+plot(pitch_cons_2)
+#traceplots
+post2 <- posterior_samples(pitch_cons_2, add_chain = T)
+mcmc_trace(post2[, c(1:7,9)],  # we need to include column 7 because it contains the chain info 
+           facet_args = list(ncol = 3), 
+           size = .15) +
+  labs(title = "My custom trace plots") + 
+  scale_color_discrete() + 
+  theme_light() +
+  theme(legend.position = c(.95, .2))
+
+#marginal effect
+brms::marginal_effects(pitch_cons_2)
+
+# PEEEPEEECHECK
+pp_check(pitch_cons_2)
+
+```
+
+```{r density plot cons model} 
 f <-   
   fitted(pitch_cons_2) %>%
   as_tibble() %>%
-  # tack the pitch_s data onto the fitted() results
+  # tack the pitch_s data onto the fitted() results 
   bind_cols(pitch_s)
 
  
@@ -254,34 +296,58 @@ p50 <-
   geom_abline(intercept = post1[1:50, 1], 
               slope     = post1[1:50, 2],
               size = 1/3, alpha = .3) +
-  geom_point(shape = 1, size = 2, color = "royalblue") +
+  geom_point(shape = 1, size = 2, color = "blue") +
   coord_cartesian(xlim = range(pitch_s$diagnosis),
                   ylim = range(pitch_s$pitchSD_s)) +
-  labs(subtitle = "N = 100") +
+  labs(subtitle = "How the models capture the data. Meta model") +
   theme_bw() +
-  theme(panel.grid = element_blank())
+  theme(panel.grid = element_blank()) +
+  labs(x = "Diagnosis", y = "SD of Pitch")
 p50
 ```
 
+```{r model}
+pacman::p_load(cowplot)
+
+#creating predictions from model
+pred <- predict(pitch_cons_2)
+pred <- as.data.frame(pred)
+pred$actual <- pitch_s$pitchSD_s
+pred$diagnosis <- pitch_s$diagnosis
+#as factor
+pred$diagnosis <- as.factor(pred$diagnosis)
 
 
+#plots
+ggplot(pred) +
+  aes(diagnosis, Estimate) +
+  geom_boxplot() 
+
+ggplot(pred) +
+  aes(diagnosis, Estimate) +
+  geom_violin() 
+
+ggplot(pred) +
+  aes(diagnosis, actual) +
+  geom_violin() 
+```
 
 
 
 #Step 4: [META] Now re-run the model with the meta-analytic prior
 - Describe and plot the estimates. Evaluate model quality
 ```{r meta pitch model}
-pitch_meta <- brm( 
-  pitchSD_s ~ 1 + diagnosis + (1 | studynr) + (1 | ID_unique) + (1 | trial),
+pitch_meta <- brm(
+  pitchSD_s ~ 1 + diagnosis + (1 | ID_unique) + (1 | trial/studynr), 
   prior = c(set_prior("normal(0, 0.1)", class = "Intercept"), 
             set_prior("normal(-0.61 , 0.29)", class = "b"),
-            set_prior("cauchy(0, 0.1)", class = "sd", coef = "Intercept", group = "studynr"),    # random effect: study
-            set_prior("cauchy(0, 0.1)", class = "sd", coef = "Intercept", group = "ID_unique"),  # random effect: ID
-            set_prior("cauchy(0, 0.1)", class = "sd", coef = "Intercept", group = "trial"),      # random effect: trial
+            set_prior("cauchy(0, 0.1)", class = "sd", coef = "Intercept", group = "ID_unique"),      # random effect: ID
+            set_prior("cauchy(0, 0.1)", class = "sd", coef = "Intercept", group = "trial:studynr"),  # nested random effect: trial + studynr
             set_prior("cauchy(0, 1)", class = "sigma")),
   iter = 10000,
+  cores = 4,
   data = pitch_s
-  )
+)
 
 pitch_meta
 
@@ -291,14 +357,13 @@ plot(pitch_meta)
 
 #marginal effects w/o data
 brms::marginal_effects(pitch_meta)
-pitch_s$diagnosis <- as.factor(pitch_s$diagnosis)
 
 #marg effects w data
 plot(marginal_effects(pitch_meta))
 ```
 
 ```{r plot meta }
-pred.plot.mm1 <- mm %>%
+pred.plot.mm1 <- mm %>% 
   filter(diagnosis == 1) %>%
   ggplot(aes(x = Estimate)) +
   #stat_function(fun = dnorm, args = list(mean = -0.61, sd = 0.28), linetype = 2) + 
@@ -325,7 +390,7 @@ grid.arrange(pred.plot.mm1, pred.plot.mm2)
 ```{r another meta oooone}
 # now use `fitted()` to get the model-implied trajectories
 pm <-  
-  fitted(pitch_meta) %>%
+  fitted(pitch_meta) %>% 
   as_tibble() %>%
   # tack the `pitch_s` data onto the `fitted()` results
   bind_cols(pitch_s)
@@ -354,7 +419,7 @@ mcmc_trace(meta.post[, c(1:6,172)],  # we need to include column 7 because it co
 
 
 #Step 5: Compare the models
-- Plot priors and posteriors of the diagnosis effect in both models
+- Plot priors and posteriors of the diagnosis effect in both models 
 - Compare posteriors between the two models
 - Compare their relative distance from truth (WAIC)
 - Discuss how they compare and whether any of them is best.
@@ -405,22 +470,18 @@ waic(pitch_meta, pitch_cons_2) #the outcome of the meta-analysis does slightly b
 ```{r WAIC comparison } 
 # compute and save the WAIC information for the next three models
 pitch_cons_2 <- add_criterion(pitch_cons_2, "waic")
-pitch_meta <- add_criterion(pitch_meta, "waic")
+pitch_meta <- add_criterion(pitch_meta, "waic") 
 
 # compare the WAIC estimates
 w <- loo_compare(pitch_cons_2, pitch_meta,
                  criterion = "waic")
 
-print(w, simplify = F)
+print(w, simplify = T)
 
-model_weights(pitch_cons_2, pitch_meta, 
-              weights = "waic") %>% 
+model_weights(pitch_cons_2, pitch_meta, weights = "waic") %>% 
   round(digits = 2)
 
-#pitch_cons_2   pitch_meta 
-#        0.98         0.02 
 ```
-
 
 
 #Step 6: Prepare a nice write up of the analysis and answer the questions at the top.

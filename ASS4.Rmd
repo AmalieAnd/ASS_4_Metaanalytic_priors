@@ -84,10 +84,6 @@ forest(pitch_cons,
 ```
 
 
-
-
-
-
 # Step 2: Prepare the pitch SD data from last year
 - the data is available as Assignment4PitchData.csv (thanks Celine)
 - Also, let's standardize the data, so that they are compatible with our meta-analytic prior (Cohen's d is measured in SDs). 
